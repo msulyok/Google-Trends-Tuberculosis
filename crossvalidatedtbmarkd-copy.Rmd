@@ -1,0 +1,129 @@
+---
+title: "Crossvalidated Tuberculosis"
+author: "Sulyok et al."
+date: '2019 october 29 '
+output: word_document
+---
+
+```{r echo=TRUE}
+library(readr)
+library(lattice)
+masterall <- read_delim("masterall.csv", ";", escape_double = FALSE, col_types = cols(time = col_date(format = "%Y.%m.%d")), trim_ws = TRUE)
+summary(masterall)
+
+densityplot(masterall$diabgt)
+densityplot(masterall$rkitb) #nicely distributed, no need for transformation
+
+##diab as external
+library(forecast)
+gts <- ts(masterall$diabgt, start=c(2014, 24), end=c(2019, 20), frequency=52)
+rkts <- ts( masterall$rkitb , start=c(2014, 24), end=c(2019, 20), frequency=52)
+summary(gts)
+summary(rkts)
+plot(decompose(rkts))
+plot(decompose(gts))
+
+
+library(ggplot2)
+
+ggplot(data = masterall, aes(x = time)) +
+geom_point(aes(y = rkitb, colour = "RKI"), alpha= 0.4) + geom_smooth(aes(y = rkitb, colour = "RKI"), span = 0.3) +
+geom_point(aes(y = diabgt, colour = "GTD"), alpha= 0.4) + geom_smooth(aes(y = diabgt, colour = "GTD"), span = 0.3) +
+scale_colour_manual("", breaks = c("RKI", "GTD"), values = c("red", "blue")) +
+scale_x_date(date_minor_breaks = "1 month") +
+xlab(NULL) +
+ylab("Weekly case number/Google search volume") +
+theme_bw()
+
+cor.test(rkts, gts, method="kendall")
+  
+
+acf( rkts, lag.max = 52 )
+acf( diff( rkts ), lag.max = 100 )
+acf( diff( rkts, 52 ), lag.max = 100 )
+acf( diff( diff( rkts, 52 ) ), lag.max = 100 )
+
+fit <- auto.arima( rkts, trace = TRUE, approximation = FALSE )
+fit
+far2 <- function(x, h){forecast(fit, h=h)}
+e <- tsCV(rkts, far2, h=1, window= 12)
+rmse<-sqrt(mean(e^2, na.rm=TRUE))
+rmse
+
+
+
+
+
+
+fitGT <- auto.arima( rkts, trace = TRUE, approximation = FALSE, xreg = gts )
+fitGT
+
+fc <- function(y, h, xreg)
+{
+  X <- xreg[1:length(y),]
+  if(NROW(xreg) < length(y) + h)
+    stop("Not enough xreg data for forecasting")
+  newX <- xreg[length(y)+(1:h), ]
+  fit <- auto.arima(y, xreg=X)
+  forecast(fit, xreg=newX)
+}
+
+
+y <- rkts
+x <- matrix(gts,ncol=1)
+e2 <- tsCV(y, fc, xreg=x, window = 12)
+rmsegt<-sqrt(mean(e2^2, na.rm=TRUE))
+rmsegt
+
+autoplot(e, series="SARIMA with traditional data", alpha=0.6) + geom_smooth(col="blue") +
+  autolayer(e2, series="GTD expanded SARIMA", alpha=0.6) + stat_smooth(aes(y=e2), col="red") + ylab("Errors") +  theme_bw() + geom_hline(yintercept = 0)
+
+
+accuracy(fit)
+accuracy(fitGT)
+
+# result:
+
+checkresiduals(fit)
+checkresiduals(fitGT)
+a<-AIC( fit, fitGT ) 
+a
+
+#nnetar
+
+fitn<-nnetar(rkts)
+fitgtn<-nnetar(rkts, xreg=gts)
+fitn
+summary(fitn)
+fitgtn
+summary(fitgtn)
+accuracy(fitn)
+accuracy(fitgtn)
+set.seed(0)
+modelcv <- CVar(rkts, k=5)
+print(modelcv)
+modelcv$fold1
+modelcv$fold2
+modelcv$fold3
+modelcv$fold4
+modelcv$fold5
+set.seed(0)
+modelcvgt <- CVar(rkts, k=5, xreg=gts)
+print(modelcvgt)
+modelcvgt$fold1
+modelcvgt$fold2
+modelcvgt$fold3
+modelcvgt$fold4
+modelcvgt$fold5
+library(ggplot2)
+autoplot(rkts, series="Data") + geom_smooth(col="red", span=0.5) + theme_bw() +
+  autolayer(modelcv$testfit, series="Fits") + stat_smooth( aes(y=modelcv$testfit), col="green", span=0.5) + 
+  autolayer(modelcvgt$testfit, series="Fits with GTD") + stat_smooth(aes(y=modelcvgt$testfit), col="blue", span=0.5) + ylab("Tuberculosis case numbers") + ylim(c(0,180)) 
+ggAcf(modelcv$residuals)
+ggAcf(modelcvgt$residuals)
+autoplot(rkts, series="Data") +
+  autolayer(modelcv$testfit, series="Fits") +
+  autolayer(modelcvgt$testfit, series="Fits with GTD") +
+  autolayer(modelcv$residuals, series="Residuals") +
+  autolayer(modelcvgt$residuals, series="Residuals with GTD") + ylab("Tuberculosis case numbers")
+```
